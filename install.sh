@@ -1181,24 +1181,26 @@ action_personality() {
     fi
     echo
     echo -e "  ${C_CYAN}1)${C_RESET} ${C_BOLD}Pilih dari preset siap pakai${C_RESET}"
-    echo -e "  ${C_CYAN}2)${C_RESET} Edit manual (pakai \$EDITOR / nano / vi)"
-    echo -e "  ${C_CYAN}3)${C_RESET} Lihat isi SOUL.md saat ini"
-    echo -e "  ${C_CYAN}4)${C_RESET} Backup SOUL.md saat ini"
-    echo -e "  ${C_CYAN}5)${C_RESET} ${C_RED}Hapus SOUL.md (kembali ke default Hermes)${C_RESET}"
-    echo -e "  ${C_CYAN}6)${C_RESET} Kembali ke menu"
+    echo -e "  ${C_CYAN}2)${C_RESET} ${C_BOLD}Edit langsung di terminal${C_RESET} ${C_DIM}(built-in editor — tanpa nano/vim)${C_RESET}"
+    echo -e "  ${C_CYAN}3)${C_RESET} Edit pakai editor eksternal (nano/vim/\$EDITOR)"
+    echo -e "  ${C_CYAN}4)${C_RESET} Lihat isi SOUL.md saat ini"
+    echo -e "  ${C_CYAN}5)${C_RESET} Backup SOUL.md saat ini"
+    echo -e "  ${C_CYAN}6)${C_RESET} ${C_RED}Hapus SOUL.md (kembali ke default Hermes)${C_RESET}"
+    echo -e "  ${C_CYAN}7)${C_RESET} Kembali ke menu"
     echo
 
     local choice
-    printf "  ${C_YELLOW}?${C_RESET} Pilih [1-6]: "
+    printf "  ${C_YELLOW}?${C_RESET} Pilih [1-7]: "
     IFS= read -r choice </dev/tty || choice=""
 
     case "${choice}" in
         1) personality_choose_preset ;;
-        2) personality_edit_manual ;;
-        3) personality_show ;;
-        4) personality_backup ;;
-        5) personality_delete ;;
-        6|*) return 0 ;;
+        2) personality_edit_inline ;;
+        3) personality_edit_manual ;;
+        4) personality_show ;;
+        5) personality_backup ;;
+        6) personality_delete ;;
+        7|*) return 0 ;;
     esac
     press_enter
 }
@@ -1269,6 +1271,310 @@ personality_edit_manual() {
     "${editor}" "${SOUL_FILE}" </dev/tty
     log_ok "SOUL.md disimpan."
     log_hint "Restart sesi Hermes untuk pakai persona baru."
+}
+
+# =============================================================================
+#  BUILT-IN INLINE EDITOR untuk SOUL.md
+# =============================================================================
+# Editor sederhana yang langsung jalan di terminal tanpa nano/vim.
+# Punya 3 mode:
+#   1. Wizard guided: tanya per-bagian (nama, gaya, keahlian, aturan)
+#   2. Paste mode  : user tempel/ketik teks lengkap, tutup dengan 'EOF' / '.'
+#   3. Append mode : tambah teks ke file existing (di akhir)
+
+personality_edit_inline() {
+    show_banner
+    echo -e "${C_BOLD}${C_GREEN}═══ EDIT SOUL.md DI TERMINAL ═══${C_RESET}"
+    echo
+    echo -e "Editor built-in tanpa perlu nano/vim. Pilih cara:"
+    echo
+    echo -e "  ${C_CYAN}1)${C_RESET} ${C_BOLD}Wizard guided${C_RESET} ${C_DIM}(tanya per bagian: nama, gaya, dll)${C_RESET}"
+    echo -e "  ${C_CYAN}2)${C_RESET} ${C_BOLD}Paste/ketik full${C_RESET} ${C_DIM}(tempel teks, tutup dengan baris EOF)${C_RESET}"
+    echo -e "  ${C_CYAN}3)${C_RESET} Tambah baris ke file existing"
+    echo -e "  ${C_CYAN}4)${C_RESET} Hapus 1 baris berdasarkan nomor"
+    echo -e "  ${C_CYAN}5)${C_RESET} Lihat isi sekarang (dengan nomor baris)"
+    echo -e "  ${C_CYAN}6)${C_RESET} Kembali"
+    echo
+
+    local choice
+    printf "  ${C_YELLOW}?${C_RESET} Pilih [1-6]: "
+    IFS= read -r choice </dev/tty || choice=""
+
+    case "${choice}" in
+        1) inline_edit_wizard ;;
+        2) inline_edit_paste ;;
+        3) inline_edit_append ;;
+        4) inline_edit_delete_line ;;
+        5) inline_edit_show_numbered ;;
+        6|*) return 0 ;;
+    esac
+}
+
+# Backup helper untuk inline editor
+inline_backup_existing() {
+    if [[ -f "${SOUL_FILE}" ]]; then
+        local bak="${SOUL_FILE}.bak.$(date +%s)"
+        cp "${SOUL_FILE}" "${bak}"
+        log_hint "Backup file lama: ${bak}"
+    fi
+}
+
+# --- Mode 1: Wizard guided -----------------------------------------------
+inline_edit_wizard() {
+    echo
+    log_step "Wizard SOUL.md — jawab pertanyaan, ENTER untuk lewati"
+    echo
+
+    log_hint "Tekan ENTER tanpa isi → pakai contoh default"
+    echo
+
+    local nama tone keahlian aturan extra
+    nama=$(prompt_optional "Nama agent" "Hermes")
+
+    echo
+    echo -e "${C_BOLD}Gaya bicara${C_RESET} (contoh: 'ramah, sopan, pakai Bahasa Indonesia, sertakan emoji')"
+    tone=$(prompt_optional "Gaya bicara" "Ringkas, langsung ke poin, jujur kalau tidak tahu")
+
+    echo
+    echo -e "${C_BOLD}Keahlian utama${C_RESET} (pisahkan dengan koma)"
+    keahlian=$(prompt_optional "Keahlian" "Software engineering, DevOps, Linux sysadmin")
+
+    echo
+    echo -e "${C_BOLD}Aturan perilaku${C_RESET} (pisahkan dengan koma, contoh: 'jangan jalankan rm -rf, selalu konfirmasi')"
+    aturan=$(prompt_optional "Aturan" "Selalu konfirmasi sebelum perintah destruktif, jelaskan dampak command")
+
+    echo
+    echo -e "${C_BOLD}Catatan tambahan${C_RESET} (opsional, paragraf bebas)"
+    extra=$(prompt_optional "Catatan" "")
+
+    # Konversi keahlian & aturan (CSV) ke bullet list
+    local keahlian_md=""
+    IFS=',' read -ra K_ARR <<< "${keahlian}"
+    for k in "${K_ARR[@]}"; do
+        k="${k# }"; k="${k% }"
+        [[ -n "${k}" ]] && keahlian_md+=$'\n'"- ${k}"
+    done
+
+    local aturan_md=""
+    IFS=',' read -ra A_ARR <<< "${aturan}"
+    for a in "${A_ARR[@]}"; do
+        a="${a# }"; a="${a% }"
+        [[ -n "${a}" ]] && aturan_md+=$'\n'"- ${a}"
+    done
+
+    inline_backup_existing
+
+    {
+        echo "# Identitas"
+        echo
+        echo "Kamu adalah ${nama}, asisten AI."
+        if [[ -n "${extra}" ]]; then
+            echo
+            echo "${extra}"
+        fi
+        echo
+        echo "## Gaya bicara"
+        echo
+        echo "- ${tone}"
+        echo
+        echo "## Keahlian"
+        [[ -n "${keahlian_md}" ]] && echo "${keahlian_md}"
+        echo
+        echo "## Aturan"
+        [[ -n "${aturan_md}" ]] && echo "${aturan_md}"
+    } > "${SOUL_FILE}"
+
+    log_ok "SOUL.md berhasil ditulis dari wizard."
+    echo
+    hr
+    cat "${SOUL_FILE}"
+    hr
+    log_hint "Restart sesi Hermes untuk pakai persona baru."
+    press_enter
+}
+
+# --- Mode 2: Paste / ketik full -----------------------------------------
+inline_edit_paste() {
+    echo
+    log_step "Paste/ketik isi SOUL.md baru"
+    echo
+    log_hint "Tempel atau ketik teks Markdown kamu."
+    log_hint "Untuk SELESAI: ketik ${C_BOLD}EOF${C_RESET} ${C_DIM}(atau titik tunggal '.')${C_RESET} di baris kosong, lalu ENTER."
+    log_hint "Untuk BATAL : ketik ${C_BOLD}CANCEL${C_RESET} di baris kosong."
+    echo
+    hr
+
+    local tmp line
+    tmp=$(mktemp)
+
+    while IFS= read -r line </dev/tty; do
+        case "${line}" in
+            EOF|eof|.)        break ;;
+            CANCEL|cancel)
+                rm -f "${tmp}"
+                log_warn "Dibatalkan, tidak ada perubahan."
+                press_enter
+                return 0
+                ;;
+            *) printf '%s\n' "${line}" >> "${tmp}" ;;
+        esac
+    done
+
+    hr
+    local total
+    total=$(wc -l < "${tmp}")
+    if (( total == 0 )); then
+        rm -f "${tmp}"
+        log_warn "Input kosong, tidak menyimpan."
+        press_enter
+        return 0
+    fi
+
+    echo
+    log_info "Kamu sudah mengetik ${total} baris. Preview 10 baris pertama:"
+    echo -e "${C_DIM}"
+    head -n 10 "${tmp}" | sed 's/^/    /'
+    echo -e "${C_RESET}"
+
+    if ! prompt_yes_no "Simpan ke ${SOUL_FILE}?" "y"; then
+        rm -f "${tmp}"
+        log_warn "Dibatalkan."
+        press_enter
+        return 0
+    fi
+
+    inline_backup_existing
+    mv "${tmp}" "${SOUL_FILE}"
+    log_ok "SOUL.md tersimpan (${total} baris)."
+    log_hint "Restart sesi Hermes untuk pakai persona baru."
+    press_enter
+}
+
+# --- Mode 3: Append baris ke file existing ------------------------------
+inline_edit_append() {
+    echo
+    log_step "Tambah baris ke SOUL.md"
+    echo
+
+    if [[ ! -f "${SOUL_FILE}" ]]; then
+        log_warn "SOUL.md belum ada. Buat file dengan template default dulu."
+        soul_preset_default > "${SOUL_FILE}"
+        log_ok "File baru dibuat."
+    fi
+
+    log_hint "Ketik baris tambahan satu per satu."
+    log_hint "Tutup dengan baris ${C_BOLD}EOF${C_RESET} (atau '.'), atau ${C_BOLD}CANCEL${C_RESET} untuk batal."
+    echo
+
+    local tmp line count=0
+    tmp=$(mktemp)
+
+    while IFS= read -r line </dev/tty; do
+        case "${line}" in
+            EOF|eof|.)        break ;;
+            CANCEL|cancel)
+                rm -f "${tmp}"
+                log_warn "Dibatalkan."
+                press_enter
+                return 0
+                ;;
+            *)
+                printf '%s\n' "${line}" >> "${tmp}"
+                ((count++))
+                ;;
+        esac
+    done
+
+    if (( count == 0 )); then
+        rm -f "${tmp}"
+        log_warn "Tidak ada baris untuk ditambah."
+        press_enter
+        return 0
+    fi
+
+    inline_backup_existing
+    # Pastikan file diakhiri newline sebelum append
+    [[ -s "${SOUL_FILE}" ]] && [[ -n "$(tail -c 1 "${SOUL_FILE}")" ]] && echo >> "${SOUL_FILE}"
+    cat "${tmp}" >> "${SOUL_FILE}"
+    rm -f "${tmp}"
+
+    log_ok "${count} baris ditambahkan ke SOUL.md."
+    log_hint "Restart sesi Hermes untuk pakai persona baru."
+    press_enter
+}
+
+# --- Mode 4: Hapus baris berdasarkan nomor ------------------------------
+inline_edit_delete_line() {
+    echo
+    if [[ ! -f "${SOUL_FILE}" ]]; then
+        log_warn "SOUL.md belum ada."
+        press_enter
+        return 0
+    fi
+
+    log_step "Hapus baris dari SOUL.md"
+    echo
+
+    # Tampilkan dengan nomor
+    hr
+    nl -ba "${SOUL_FILE}" | sed 's/^/  /'
+    hr
+    echo
+
+    local lineno
+    lineno=$(prompt_required "Nomor baris yang mau dihapus" "atau 'q' untuk batal")
+    if [[ "${lineno,,}" == "q" ]] || [[ "${lineno,,}" == "cancel" ]]; then
+        log_info "Dibatalkan."
+        press_enter
+        return 0
+    fi
+    if ! [[ "${lineno}" =~ ^[0-9]+$ ]]; then
+        log_err "Nomor tidak valid."
+        press_enter
+        return 1
+    fi
+
+    local total
+    total=$(wc -l < "${SOUL_FILE}")
+    if (( lineno < 1 || lineno > total )); then
+        log_err "Nomor di luar range (1-${total})."
+        press_enter
+        return 1
+    fi
+
+    local removed
+    removed=$(sed -n "${lineno}p" "${SOUL_FILE}")
+    echo
+    log_info "Baris yang akan dihapus:"
+    echo -e "  ${C_DIM}${removed}${C_RESET}"
+    echo
+
+    if ! prompt_yes_no "Konfirmasi hapus baris ${lineno}?" "n"; then
+        log_info "Dibatalkan."
+        press_enter
+        return 0
+    fi
+
+    inline_backup_existing
+    sed -i.tmp "${lineno}d" "${SOUL_FILE}" && rm -f "${SOUL_FILE}.tmp"
+    log_ok "Baris ${lineno} dihapus."
+    press_enter
+}
+
+# --- Mode 5: Tampilkan dengan nomor baris -------------------------------
+inline_edit_show_numbered() {
+    echo
+    if [[ ! -f "${SOUL_FILE}" ]]; then
+        log_warn "SOUL.md belum ada."
+        press_enter
+        return 0
+    fi
+    hr
+    echo -e "${C_BOLD}Isi ${SOUL_FILE} (dengan nomor baris):${C_RESET}"
+    hr
+    nl -ba "${SOUL_FILE}" | sed 's/^/  /'
+    hr
+    press_enter
 }
 
 personality_show() {
