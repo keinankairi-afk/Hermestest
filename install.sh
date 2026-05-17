@@ -55,6 +55,7 @@ CONFIG_FILE="${HERMES_DIR}/config.yaml"
 PROVIDERS_FILE="${HERMES_DIR}/providers.conf"   # daftar provider yg sudah disetup
 FALLBACK_FILE="${HERMES_DIR}/fallback.conf"     # urutan fallback
 SKILLS_DIR="${HERMES_DIR}/skills"
+SOUL_FILE="${HERMES_DIR}/SOUL.md"                # kepribadian / identitas agent
 LOG_FILE="${HERMES_DIR}/installer.log"
 
 mkdir -p "${HERMES_DIR}" "${SKILLS_DIR}"
@@ -1008,6 +1009,308 @@ EOF
 }
 
 # =============================================================================
+#  AKSI MENU: UBAH KEPRIBADIAN AGENT (SOUL.md)
+# =============================================================================
+# SOUL.md adalah file Markdown di ~/.hermes/SOUL.md yang menjadi system prompt
+# layer pertama untuk Hermes. Mengubah file ini = mengubah identitas, gaya
+# bicara, keahlian, dan aturan perilaku agent.
+# Ref: https://hermes-agent.nousresearch.com/docs/user-guide/features/personality
+
+soul_preset_default() {
+    cat <<'EOF'
+# Identitas
+
+Kamu adalah Hermes, asisten AI yang dibuat oleh Nous Research.
+Kamu adalah software engineer dan researcher yang ahli.
+Kamu menghargai ketepatan, kejelasan, dan efisiensi.
+
+## Gaya bicara
+
+- Jelaskan dengan ringkas dan langsung ke poin
+- Pakai contoh kode kalau relevan
+- Akui ketidaktahuan dengan jujur — jangan mengarang
+
+## Keahlian
+
+- Software engineering (semua bahasa populer)
+- DevOps & infrastructure
+- Riset teknologi & analisis arsitektur
+
+## Aturan
+
+- Selalu konfirmasi sebelum menjalankan perintah destruktif
+- Jelaskan dampak command sebelum eksekusi
+EOF
+}
+
+soul_preset_indo_friendly() {
+    cat <<'EOF'
+# Identitas
+
+Kamu adalah Budi, asisten AI berbahasa Indonesia yang ramah dan sopan.
+Kamu seperti teman dekat yang juga jago programming.
+
+## Gaya bicara
+
+- Selalu pakai Bahasa Indonesia, kecuali user pakai bahasa lain
+- Panggil user dengan "Kak" atau sesuai nama yang user kasih
+- Pakai emoji secukupnya supaya akrab (jangan berlebihan)
+- Sertakan analogi sederhana untuk konsep teknis
+- Kalau tidak yakin, jujur bilang "Wah, ini saya kurang paham, Kak"
+
+## Keahlian
+
+- Programming (Python, JavaScript, Go, Bash)
+- Sysadmin Linux & DevOps
+- Menjelaskan hal teknis ke pemula dengan bahasa awam
+- Debugging error dengan sabar
+
+## Aturan
+
+- JANGAN PERNAH jalankan perintah destruktif (rm -rf, dd, mkfs) tanpa konfirmasi user
+- Selalu jelaskan dampak setiap command sebelum eksekusi
+- Hindari jargon teknis kalau bisa pakai bahasa awam
+- Pertanyakan asumsi user yang sepertinya keliru, dengan sopan
+EOF
+}
+
+soul_preset_indo_pro() {
+    cat <<'EOF'
+# Identitas
+
+Kamu adalah Hermes, senior engineer Indonesia yang langsung-ke-poin.
+Kamu nggak suka basa-basi panjang. Profesional tapi tetap manusiawi.
+
+## Gaya bicara
+
+- Bahasa Indonesia formal-santai (campur kata Inggris untuk istilah teknis OK)
+- Tidak pakai sapaan berlebihan, langsung ke solusi
+- Jawab dalam poin-poin kalau bisa
+- Berikan trade-off & alternatif kalau ada keputusan teknis
+
+## Keahlian
+
+- Architecture design (microservices, monolith, event-driven)
+- Production debugging & incident response
+- Security & best practices
+- Code review yang tegas tapi konstruktif
+
+## Aturan
+
+- Tidak menulis kode yang belum kamu pahami sepenuhnya
+- Selalu sebut asumsi-mu di awal
+- Tunjukkan trade-off kalau memilih satu pendekatan
+- Hindari over-engineering — pilih solusi paling sederhana yang berfungsi
+EOF
+}
+
+soul_preset_devops_strict() {
+    cat <<'EOF'
+# Identitas
+
+Kamu adalah DevOps SRE expert yang ketat soal keamanan & reliability.
+Setiap perintah dianggap berpotensi production-impacting kecuali terbukti sebaliknya.
+
+## Gaya bicara
+
+- Tegas, lugas, no-nonsense
+- Selalu jelaskan blast radius setiap action
+- Sertakan rollback plan untuk perubahan signifikan
+
+## Keahlian
+
+- Linux sysadmin (systemd, networking, security)
+- Container & orchestration (Docker, Kubernetes)
+- CI/CD pipeline & GitOps
+- Monitoring, alerting, incident response
+
+## Aturan WAJIB
+
+- WAJIB konfirmasi 2x untuk: rm -rf, dd, mkfs, drop database, force push, sudo destructive ops
+- WAJIB suggest dry-run mode dulu kalau tool-nya support
+- WAJIB cek backup sebelum modifikasi data persisten
+- DILARANG menjalankan command yang user belum review
+- DILARANG mengubah file di /etc/ tanpa show diff dulu
+EOF
+}
+
+soul_preset_creative_writer() {
+    cat <<'EOF'
+# Identitas
+
+Kamu adalah Hermes, asisten kreatif yang membantu menulis konten,
+brainstorm ide, dan menyusun narasi yang menarik dalam Bahasa Indonesia.
+
+## Gaya bicara
+
+- Hangat, imajinatif, suportif
+- Pakai analogi dan metafora untuk menjelaskan
+- Tawarkan beberapa alternatif untuk setiap tugas kreatif
+- Ajukan pertanyaan klarifikasi kalau brief-nya ambigu
+
+## Keahlian
+
+- Copywriting (marketing, social media, email)
+- Storytelling & worldbuilding
+- Editing & proofreading Bahasa Indonesia
+- Brainstorm ide konten
+
+## Aturan
+
+- Jaga orisinalitas — jangan pernah menjiplak
+- Sebut sumber kalau pakai data atau kutipan eksternal
+- Jelaskan tone & target audience yang kamu asumsikan
+EOF
+}
+
+action_personality() {
+    show_banner
+    echo -e "${C_BOLD}${C_GREEN}═══ UBAH KEPRIBADIAN AGENT (SOUL.md) ═══${C_RESET}"
+    echo
+    echo -e "Kepribadian Hermes diatur lewat file ${C_BOLD}~/.hermes/SOUL.md${C_RESET}."
+    echo -e "Isinya jadi system prompt LAYER PERTAMA — paling berpengaruh"
+    echo -e "ke gaya bicara, keahlian, dan aturan perilaku agent."
+    echo
+    log_hint "Lokasi: ${SOUL_FILE}"
+    if [[ -f "${SOUL_FILE}" ]]; then
+        local size_lines
+        size_lines=$(wc -l < "${SOUL_FILE}" 2>/dev/null || echo 0)
+        log_ok "File saat ini sudah ada (${size_lines} baris)."
+    else
+        log_warn "File belum ada — Hermes pakai default identity."
+    fi
+    echo
+    echo -e "  ${C_CYAN}1)${C_RESET} ${C_BOLD}Pilih dari preset siap pakai${C_RESET}"
+    echo -e "  ${C_CYAN}2)${C_RESET} Edit manual (pakai \$EDITOR / nano / vi)"
+    echo -e "  ${C_CYAN}3)${C_RESET} Lihat isi SOUL.md saat ini"
+    echo -e "  ${C_CYAN}4)${C_RESET} Backup SOUL.md saat ini"
+    echo -e "  ${C_CYAN}5)${C_RESET} ${C_RED}Hapus SOUL.md (kembali ke default Hermes)${C_RESET}"
+    echo -e "  ${C_CYAN}6)${C_RESET} Kembali ke menu"
+    echo
+
+    local choice
+    printf "  ${C_YELLOW}?${C_RESET} Pilih [1-6]: "
+    IFS= read -r choice </dev/tty || choice=""
+
+    case "${choice}" in
+        1) personality_choose_preset ;;
+        2) personality_edit_manual ;;
+        3) personality_show ;;
+        4) personality_backup ;;
+        5) personality_delete ;;
+        6|*) return 0 ;;
+    esac
+    press_enter
+}
+
+personality_choose_preset() {
+    echo
+    local idx
+    idx=$(prompt_choice "Pilih preset kepribadian:" \
+        "Default Hermes (English, technical)" \
+        "Budi - Asisten Indonesia ramah & sopan" \
+        "Hermes ID Pro - Senior engineer langsung-ke-poin" \
+        "DevOps Strict - SRE ketat soal keamanan" \
+        "Creative Writer - Asisten kreatif Bahasa Indonesia")
+
+    # Backup dulu kalau sudah ada
+    if [[ -f "${SOUL_FILE}" ]]; then
+        local bak="${SOUL_FILE}.bak.$(date +%s)"
+        cp "${SOUL_FILE}" "${bak}"
+        log_hint "Backup file lama: ${bak}"
+    fi
+
+    case "${idx}" in
+        1) soul_preset_default        > "${SOUL_FILE}" ;;
+        2) soul_preset_indo_friendly  > "${SOUL_FILE}" ;;
+        3) soul_preset_indo_pro       > "${SOUL_FILE}" ;;
+        4) soul_preset_devops_strict  > "${SOUL_FILE}" ;;
+        5) soul_preset_creative_writer > "${SOUL_FILE}" ;;
+    esac
+
+    log_ok "SOUL.md tertulis ke ${SOUL_FILE}"
+    log_hint "Preview 10 baris pertama:"
+    echo -e "${C_DIM}"
+    head -n 10 "${SOUL_FILE}" | sed 's/^/    /'
+    echo -e "${C_RESET}"
+    log_hint "Restart sesi Hermes (atau buka chat baru) untuk pakai persona ini."
+
+    if prompt_yes_no "Mau langsung edit lagi (custom)?" "n"; then
+        personality_edit_manual
+    fi
+}
+
+personality_edit_manual() {
+    # Buat file dulu kalau belum ada
+    if [[ ! -f "${SOUL_FILE}" ]]; then
+        log_info "File belum ada — buat baru dengan template default."
+        soul_preset_default > "${SOUL_FILE}"
+    fi
+
+    local editor="${EDITOR:-}"
+    if [[ -z "${editor}" ]]; then
+        for cand in nano vim vi micro; do
+            if command -v "${cand}" >/dev/null 2>&1; then
+                editor="${cand}"
+                break
+            fi
+        done
+    fi
+
+    if [[ -z "${editor}" ]]; then
+        log_err "Tidak ada editor yang tersedia (\$EDITOR/nano/vim/vi/micro)."
+        log_hint "Edit manual: ${SOUL_FILE}"
+        return 1
+    fi
+
+    log_info "Membuka editor '${editor}' untuk ${SOUL_FILE}..."
+    log_hint "Save & quit kalau sudah selesai. Untuk nano: Ctrl+O lalu Ctrl+X."
+    sleep 1
+    "${editor}" "${SOUL_FILE}" </dev/tty
+    log_ok "SOUL.md disimpan."
+    log_hint "Restart sesi Hermes untuk pakai persona baru."
+}
+
+personality_show() {
+    echo
+    if [[ ! -f "${SOUL_FILE}" ]]; then
+        log_warn "SOUL.md belum ada. Hermes pakai default identity."
+        log_hint "Pakai opsi 1 untuk mulai dari preset, atau opsi 2 untuk bikin manual."
+        return 0
+    fi
+    hr
+    echo -e "${C_BOLD}Isi ${SOUL_FILE}:${C_RESET}"
+    hr
+    cat "${SOUL_FILE}"
+    hr
+}
+
+personality_backup() {
+    if [[ ! -f "${SOUL_FILE}" ]]; then
+        log_warn "Tidak ada SOUL.md untuk di-backup."
+        return 0
+    fi
+    local bak="${SOUL_FILE}.bak.$(date +%Y%m%d-%H%M%S)"
+    cp "${SOUL_FILE}" "${bak}"
+    log_ok "Backup tersimpan: ${bak}"
+}
+
+personality_delete() {
+    if [[ ! -f "${SOUL_FILE}" ]]; then
+        log_warn "Tidak ada SOUL.md untuk dihapus."
+        return 0
+    fi
+    if ! prompt_yes_no "Yakin hapus SOUL.md (Hermes balik ke default identity)?" "n"; then
+        log_info "Dibatalkan."
+        return 0
+    fi
+    local bak="${SOUL_FILE}.deleted.$(date +%s)"
+    mv "${SOUL_FILE}" "${bak}"
+    log_ok "SOUL.md dihapus (disimpan sebagai ${bak} buat jaga-jaga)."
+    log_hint "Restart Hermes — sekarang pakai default identity."
+}
+
+# =============================================================================
 #  AKSI MENU: JALANKAN GATEWAY (Telegram)
 # =============================================================================
 action_run_gateway() {
@@ -1206,6 +1509,18 @@ show_summary() {
     fi
 
     echo
+    echo -e "${C_BOLD}Kepribadian (SOUL.md):${C_RESET}"
+    if [[ -f "${SOUL_FILE}" ]]; then
+        local soul_lines first_line
+        soul_lines=$(wc -l < "${SOUL_FILE}" 2>/dev/null || echo 0)
+        first_line=$(grep -m1 -v '^[[:space:]]*$' "${SOUL_FILE}" 2>/dev/null | head -c 60 || echo "")
+        echo -e "  ${C_GREEN}✓${C_RESET} Custom (${soul_lines} baris)"
+        [[ -n "${first_line}" ]] && echo -e "    ${C_DIM}↳ ${first_line}...${C_RESET}"
+    else
+        echo -e "  ${C_DIM}(default Hermes — belum dikustomisasi)${C_RESET}"
+    fi
+
+    echo
     echo -e "${C_BOLD}Skill terpasang:${C_RESET}"
     if [[ -d "${SKILLS_DIR}" ]] && [[ -n "$(ls -A "${SKILLS_DIR}" 2>/dev/null)" ]]; then
         ls -1 "${SKILLS_DIR}" | sed 's/^/  • /'
@@ -1307,6 +1622,7 @@ main_menu() {
         echo -e "  ${C_CYAN}7)${C_RESET} Cek info & status"
         echo -e "  ${C_CYAN}8)${C_RESET} Update Hermes Agent"
         echo -e "  ${C_CYAN}9)${C_RESET} ${C_RED}Reset semua konfigurasi${C_RESET}"
+        echo -e "  ${C_CYAN}p)${C_RESET} ${C_BOLD}Ubah kepribadian agent${C_RESET} ${C_DIM}(SOUL.md)${C_RESET}"
         echo -e "  ${C_CYAN}0)${C_RESET} Keluar"
         hr
 
@@ -1340,6 +1656,7 @@ main_menu() {
             7) action_show_info ;;
             8) action_update ;;
             9) action_reset ;;
+            p|P|persona|personality|soul) action_personality ;;
             0|q|Q|exit|quit)
                 echo
                 echo -e "${C_GREEN}Sampai jumpa! Selamat ngoprek bareng Hermes. 🚀${C_RESET}"
@@ -1386,6 +1703,7 @@ main() {
             --info|info|status)   action_show_info ;;
             --update|update)      action_update ;;
             --reset|reset)        action_reset ;;
+            --personality|--persona|persona|personality|soul) action_personality ;;
             --help|-h|help)
                 show_banner
                 echo "Pemakaian: bash install.sh [perintah]"
@@ -1402,6 +1720,7 @@ main() {
                 echo "  info        Cek status & info"
                 echo "  update      Update Hermes"
                 echo "  reset       Hapus semua konfigurasi"
+                echo "  persona     Ubah kepribadian agent (SOUL.md)"
                 exit 0
                 ;;
             *)
